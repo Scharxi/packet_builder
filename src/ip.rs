@@ -27,9 +27,19 @@ impl Ipv4Address {
 /// IPv4 header flags
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Ipv4Flags {
-    reserved: bool,
-    dont_fragment: bool,
-    more_fragments: bool,
+    pub reserved: bool,
+    pub dont_fragment: bool,
+    pub more_fragments: bool,
+}
+
+impl Default for Ipv4Flags {
+    fn default() -> Self {
+        Self {
+            reserved: false,
+            dont_fragment: true,
+            more_fragments: false,
+        }
+    }
 }
 
 impl Ipv4Flags {
@@ -69,21 +79,26 @@ pub struct Ipv4Header {
 }
 
 impl Ipv4Header {
-    pub fn new(
+    fn new(
         protocol: IpProtocol,
         src_addr: Ipv4Address,
         dst_addr: Ipv4Address,
+        identification: u16,
+        flags: Ipv4Flags,
+        ttl: u8,
+        dscp: u8,
+        ecn: u8,
     ) -> Self {
         Self {
             version: 4,
             ihl: 5, // 5 32-bit words (20 bytes, no options)
-            dscp: 0,
-            ecn: 0,
+            dscp,
+            ecn,
             total_length: 20, // Will be updated when payload is added
-            identification: 0,
-            flags: Ipv4Flags::new(true, false),
+            identification,
+            flags,
             fragment_offset: 0,
-            ttl: 64,
+            ttl,
             protocol,
             checksum: 0,
             src_addr,
@@ -99,23 +114,114 @@ pub struct Ipv4Packet {
     payload: Vec<u8>,
 }
 
-impl Ipv4Packet {
-    pub fn new(
-        protocol: IpProtocol,
-        src_addr: Ipv4Address,
-        dst_addr: Ipv4Address,
-    ) -> Self {
+/// Builder for IPv4 packets
+#[derive(Debug, Default)]
+pub struct Ipv4Builder {
+    protocol: Option<IpProtocol>,
+    src_addr: Option<Ipv4Address>,
+    dst_addr: Option<Ipv4Address>,
+    identification: u16,
+    flags: Ipv4Flags,
+    ttl: u8,
+    dscp: u8,
+    ecn: u8,
+    payload: Vec<u8>,
+}
+
+impl Ipv4Builder {
+    pub fn new() -> Self {
         Self {
-            header: Ipv4Header::new(protocol, src_addr, dst_addr),
+            protocol: None,
+            src_addr: None,
+            dst_addr: None,
+            identification: 0,
+            flags: Ipv4Flags::new(true, false),
+            ttl: 64,
+            dscp: 0,
+            ecn: 0,
             payload: Vec::new(),
         }
     }
 
-    pub fn with_payload(mut self, payload: Vec<u8>) -> Self {
-        let payload_len = payload.len();
-        self.payload = payload;
-        self.header.total_length = (self.header.ihl * 4 + payload_len as u8) as u16;
+    pub fn protocol(mut self, protocol: IpProtocol) -> Self {
+        self.protocol = Some(protocol);
         self
+    }
+
+    pub fn src_addr(mut self, addr: Ipv4Address) -> Self {
+        self.src_addr = Some(addr);
+        self
+    }
+
+    pub fn dst_addr(mut self, addr: Ipv4Address) -> Self {
+        self.dst_addr = Some(addr);
+        self
+    }
+
+    pub fn identification(mut self, id: u16) -> Self {
+        self.identification = id;
+        self
+    }
+
+    pub fn flags(mut self, flags: Ipv4Flags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn ttl(mut self, ttl: u8) -> Self {
+        self.ttl = ttl;
+        self
+    }
+
+    pub fn dscp(mut self, dscp: u8) -> Self {
+        self.dscp = dscp;
+        self
+    }
+
+    pub fn ecn(mut self, ecn: u8) -> Self {
+        self.ecn = ecn;
+        self
+    }
+
+    pub fn payload(mut self, payload: Vec<u8>) -> Self {
+        self.payload = payload;
+        self
+    }
+
+    pub fn build(self) -> Result<Ipv4Packet, PacketError> {
+        let protocol = self.protocol.ok_or_else(|| 
+            PacketError::InvalidFieldValue("Protocol not set".to_string()))?;
+        let src_addr = self.src_addr.ok_or_else(|| 
+            PacketError::InvalidFieldValue("Source address not set".to_string()))?;
+        let dst_addr = self.dst_addr.ok_or_else(|| 
+            PacketError::InvalidFieldValue("Destination address not set".to_string()))?;
+
+        let mut packet = Ipv4Packet {
+            header: Ipv4Header::new(
+                protocol,
+                src_addr,
+                dst_addr,
+                self.identification,
+                self.flags,
+                self.ttl,
+                self.dscp,
+                self.ecn,
+            ),
+            payload: self.payload,
+        };
+
+        // Update total length
+        let total_length = packet.header.ihl * 4 + packet.payload.len() as u8;
+        packet.header.total_length = total_length as u16;
+
+        packet.validate()?;
+        Ok(packet)
+    }
+}
+
+impl Ipv4Packet {
+    pub fn builder() -> Ipv4Builder {
+        Ipv4Builder::new()
     }
 }
 
@@ -206,5 +312,35 @@ impl PacketBuilder for Ipv4Packet {
             return Err(PacketError::InvalidLength);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ipv4_builder() {
+        let src_ip = Ipv4Address::new([192, 168, 1, 1]);
+        let dst_ip = Ipv4Address::new([192, 168, 1, 2]);
+        
+        let packet = Ipv4Packet::builder()
+            .protocol(IpProtocol::TCP)
+            .src_addr(src_ip)
+            .dst_addr(dst_ip)
+            .identification(1234)
+            .ttl(64)
+            .payload(vec![1, 2, 3, 4])
+            .build()
+            .unwrap();
+
+        assert_eq!(packet.length(), 24); // 20 (header) + 4 (payload)
+        
+        // Test missing fields
+        let result = Ipv4Packet::builder()
+            .protocol(IpProtocol::TCP)
+            .src_addr(src_ip)
+            .build();
+        assert!(result.is_err());
     }
 } 

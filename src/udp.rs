@@ -11,11 +11,11 @@ pub struct UdpHeader {
 }
 
 impl UdpHeader {
-    pub fn new(src_port: u16, dst_port: u16) -> Self {
+    fn new(src_port: u16, dst_port: u16, length: u16) -> Self {
         Self {
             src_port,
             dst_port,
-            length: 8, // Initial length is just the header size
+            length,
             checksum: 0,
         }
     }
@@ -28,19 +28,54 @@ pub struct UdpPacket {
     payload: Vec<u8>,
 }
 
-impl UdpPacket {
-    pub fn new(src_port: u16, dst_port: u16) -> Self {
-        Self {
-            header: UdpHeader::new(src_port, dst_port),
-            payload: Vec::new(),
-        }
+/// Builder for UDP packets
+#[derive(Debug, Default)]
+pub struct UdpBuilder {
+    src_port: Option<u16>,
+    dst_port: Option<u16>,
+    payload: Vec<u8>,
+}
+
+impl UdpBuilder {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn with_payload(mut self, payload: Vec<u8>) -> Self {
-        let payload_len = payload.len();
-        self.payload = payload;
-        self.header.length = (self.header.header_length() + payload_len) as u16;
+    pub fn src_port(mut self, port: u16) -> Self {
+        self.src_port = Some(port);
         self
+    }
+
+    pub fn dst_port(mut self, port: u16) -> Self {
+        self.dst_port = Some(port);
+        self
+    }
+
+    pub fn payload(mut self, payload: Vec<u8>) -> Self {
+        self.payload = payload;
+        self
+    }
+
+    pub fn build(self) -> Result<UdpPacket, PacketError> {
+        let src_port = self.src_port.ok_or_else(|| 
+            PacketError::InvalidFieldValue("Source port not set".to_string()))?;
+        let dst_port = self.dst_port.ok_or_else(|| 
+            PacketError::InvalidFieldValue("Destination port not set".to_string()))?;
+
+        let length = (8 + self.payload.len()) as u16; // 8 bytes header + payload
+        let packet = UdpPacket {
+            header: UdpHeader::new(src_port, dst_port, length),
+            payload: self.payload,
+        };
+
+        packet.validate()?;
+        Ok(packet)
+    }
+}
+
+impl UdpPacket {
+    pub fn builder() -> UdpBuilder {
+        UdpBuilder::new()
     }
 }
 
@@ -112,5 +147,29 @@ impl PacketBuilder for UdpPacket {
             return Err(PacketError::InvalidLength);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_udp_builder() {
+        let packet = UdpPacket::builder()
+            .src_port(12345)
+            .dst_port(53)
+            .payload(vec![1, 2, 3, 4])
+            .build()
+            .unwrap();
+
+        assert!(packet.validate().is_ok());
+        assert_eq!(packet.length(), 12); // 8 (header) + 4 (payload)
+        
+        // Test missing fields
+        let result = UdpPacket::builder()
+            .src_port(12345)
+            .build();
+        assert!(result.is_err());
     }
 } 

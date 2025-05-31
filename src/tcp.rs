@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use crate::{PacketBuilder, PacketError, PacketHeader, Checksumable};
 
 /// TCP Flags
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct TcpFlags {
     pub fin: bool,
     pub syn: bool,
@@ -16,16 +16,7 @@ pub struct TcpFlags {
 
 impl TcpFlags {
     pub fn new() -> Self {
-        Self {
-            fin: false,
-            syn: false,
-            rst: false,
-            psh: false,
-            ack: false,
-            urg: false,
-            ece: false,
-            cwr: false,
-        }
+        Self::default()
     }
 
     pub fn as_u8(&self) -> u8 {
@@ -89,48 +80,34 @@ pub struct TcpHeader {
 }
 
 impl TcpHeader {
-    pub fn new(src_port: u16, dst_port: u16) -> Self {
-        Self {
+    fn new(
+        src_port: u16,
+        dst_port: u16,
+        sequence_number: u32,
+        acknowledgment_number: u32,
+        flags: TcpFlags,
+        window_size: u16,
+        urgent_pointer: u16,
+        options: Vec<TcpOption>,
+    ) -> Self {
+        let mut header = Self {
             src_port,
             dst_port,
-            sequence_number: 0,
-            acknowledgment_number: 0,
-            data_offset: 5, // 5 32-bit words (20 bytes, no options)
-            flags: TcpFlags::new(),
-            window_size: 65535,
+            sequence_number,
+            acknowledgment_number,
+            data_offset: 5, // Will be updated based on options
+            flags,
+            window_size,
             checksum: 0,
-            urgent_pointer: 0,
-            options: Vec::new(),
-        }
-    }
+            urgent_pointer,
+            options,
+        };
 
-    pub fn with_flags(mut self, flags: TcpFlags) -> Self {
-        self.flags = flags;
-        self
-    }
+        // Update data offset based on options
+        let total_length = header.calculate_total_length();
+        header.data_offset = (total_length / 4) as u8;
 
-    pub fn with_sequence(mut self, seq: u32) -> Self {
-        self.sequence_number = seq;
-        self
-    }
-
-    pub fn with_ack(mut self, ack: u32) -> Self {
-        self.acknowledgment_number = ack;
-        self.flags.ack = true;
-        self
-    }
-
-    pub fn with_window_size(mut self, size: u16) -> Self {
-        self.window_size = size;
-        self
-    }
-
-    pub fn add_option(mut self, option: TcpOption) -> Self {
-        self.options.push(option);
-        // Update data offset to account for options
-        let total_length = self.calculate_total_length();
-        self.data_offset = (total_length / 4) as u8;
-        self
+        header
     }
 
     fn calculate_total_length(&self) -> usize {
@@ -150,27 +127,110 @@ pub struct TcpPacket {
     payload: Vec<u8>,
 }
 
-impl TcpPacket {
-    pub fn new(src_port: u16, dst_port: u16) -> Self {
+/// Builder for TCP packets
+#[derive(Debug, Default)]
+pub struct TcpBuilder {
+    src_port: Option<u16>,
+    dst_port: Option<u16>,
+    sequence_number: u32,
+    acknowledgment_number: u32,
+    flags: TcpFlags,
+    window_size: u16,
+    urgent_pointer: u16,
+    options: Vec<TcpOption>,
+    payload: Vec<u8>,
+}
+
+impl TcpBuilder {
+    pub fn new() -> Self {
         Self {
-            header: TcpHeader::new(src_port, dst_port),
+            src_port: None,
+            dst_port: None,
+            sequence_number: 0,
+            acknowledgment_number: 0,
+            flags: TcpFlags::default(),
+            window_size: 65535,
+            urgent_pointer: 0,
+            options: Vec::new(),
             payload: Vec::new(),
         }
     }
 
-    pub fn with_payload(mut self, payload: Vec<u8>) -> Self {
+    pub fn src_port(mut self, port: u16) -> Self {
+        self.src_port = Some(port);
+        self
+    }
+
+    pub fn dst_port(mut self, port: u16) -> Self {
+        self.dst_port = Some(port);
+        self
+    }
+
+    pub fn sequence(mut self, seq: u32) -> Self {
+        self.sequence_number = seq;
+        self
+    }
+
+    pub fn acknowledgment(mut self, ack: u32) -> Self {
+        self.acknowledgment_number = ack;
+        self.flags.ack = true;
+        self
+    }
+
+    pub fn flags(mut self, flags: TcpFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    pub fn window_size(mut self, size: u16) -> Self {
+        self.window_size = size;
+        self
+    }
+
+    pub fn urgent_pointer(mut self, pointer: u16) -> Self {
+        self.urgent_pointer = pointer;
+        self.flags.urg = true;
+        self
+    }
+
+    pub fn add_option(mut self, option: TcpOption) -> Self {
+        self.options.push(option);
+        self
+    }
+
+    pub fn payload(mut self, payload: Vec<u8>) -> Self {
         self.payload = payload;
         self
     }
 
-    pub fn with_flags(mut self, flags: TcpFlags) -> Self {
-        self.header.flags = flags;
-        self
-    }
+    pub fn build(self) -> Result<TcpPacket, PacketError> {
+        let src_port = self.src_port.ok_or_else(|| 
+            PacketError::InvalidFieldValue("Source port not set".to_string()))?;
+        let dst_port = self.dst_port.ok_or_else(|| 
+            PacketError::InvalidFieldValue("Destination port not set".to_string()))?;
 
-    pub fn with_sequence(mut self, seq: u32) -> Self {
-        self.header.sequence_number = seq;
-        self
+        let packet = TcpPacket {
+            header: TcpHeader::new(
+                src_port,
+                dst_port,
+                self.sequence_number,
+                self.acknowledgment_number,
+                self.flags,
+                self.window_size,
+                self.urgent_pointer,
+                self.options,
+            ),
+            payload: self.payload,
+        };
+
+        packet.validate()?;
+        Ok(packet)
+    }
+}
+
+impl TcpPacket {
+    pub fn builder() -> TcpBuilder {
+        TcpBuilder::new()
     }
 }
 
@@ -267,5 +327,35 @@ impl PacketBuilder for TcpPacket {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tcp_builder() {
+        let mut flags = TcpFlags::new();
+        flags.syn = true;
+        
+        let packet = TcpPacket::builder()
+            .src_port(12345)
+            .dst_port(80)
+            .sequence(1000)
+            .flags(flags)
+            .add_option(TcpOption::MaximumSegmentSize(1460))
+            .payload(vec![1, 2, 3, 4])
+            .build()
+            .unwrap();
+
+        assert!(packet.validate().is_ok());
+        
+        // Test missing fields
+        let result = TcpPacket::builder()
+            .src_port(12345)
+            .sequence(1000)
+            .build();
+        assert!(result.is_err());
     }
 } 

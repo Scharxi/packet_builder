@@ -60,8 +60,14 @@ mod tests {
     fn test_ethernet_packet() {
         let src_mac = MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
         let dst_mac = MacAddress::new([0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB]);
-        let packet = EthernetPacket::new(dst_mac, src_mac, EtherType::IPv4)
-            .with_payload(vec![1, 2, 3, 4]);
+        
+        let packet = EthernetPacket::builder()
+            .src_mac(src_mac)
+            .dst_mac(dst_mac)
+            .ether_type(EtherType::IPv4)
+            .payload(vec![1, 2, 3, 4])
+            .build()
+            .unwrap();
 
         assert!(packet.validate().is_ok());
         let bytes = packet.build().unwrap();
@@ -72,8 +78,14 @@ mod tests {
     fn test_ipv4_packet() {
         let src_ip = Ipv4Address::new([192, 168, 1, 1]);
         let dst_ip = Ipv4Address::new([192, 168, 1, 2]);
-        let packet = Ipv4Packet::new(IpProtocol::TCP, src_ip, dst_ip)
-            .with_payload(vec![1, 2, 3, 4]);
+        
+        let packet = Ipv4Packet::builder()
+            .protocol(IpProtocol::TCP)
+            .src_addr(src_ip)
+            .dst_addr(dst_ip)
+            .payload(vec![1, 2, 3, 4])
+            .build()
+            .unwrap();
 
         assert!(packet.validate().is_ok());
         let bytes = packet.build().unwrap();
@@ -85,10 +97,14 @@ mod tests {
         let mut flags = TcpFlags::new();
         flags.syn = true;
         
-        let packet = TcpPacket::new(12345, 80)
-            .with_flags(flags)
-            .with_sequence(1000)
-            .with_payload(vec![1, 2, 3, 4]);
+        let packet = TcpPacket::builder()
+            .src_port(12345)
+            .dst_port(80)
+            .sequence(1000)
+            .flags(flags)
+            .payload(vec![1, 2, 3, 4])
+            .build()
+            .unwrap();
 
         assert!(packet.validate().is_ok());
         let bytes = packet.build().unwrap();
@@ -97,8 +113,12 @@ mod tests {
 
     #[test]
     fn test_udp_packet() {
-        let packet = UdpPacket::new(12345, 53)
-            .with_payload(vec![1, 2, 3, 4]);
+        let packet = UdpPacket::builder()
+            .src_port(12345)
+            .dst_port(53)
+            .payload(vec![1, 2, 3, 4])
+            .build()
+            .unwrap();
 
         assert!(packet.validate().is_ok());
         let bytes = packet.build().unwrap();
