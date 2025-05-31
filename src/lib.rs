@@ -9,7 +9,6 @@
 //! - Async support via Tokio
 //! - Serialization support via Serde
 
-use serde::{Deserialize, Serialize};
 
 pub mod ethernet;
 pub mod ip;
@@ -80,10 +79,6 @@ pub trait PacketHeader {
     fn as_bytes(&self) -> Result<Vec<u8>, PacketError>;
 }
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,13 +88,7 @@ mod tests {
     use crate::udp::UdpPacket;
     use crate::icmp::{IcmpPacket, IcmpType};
     use crate::arp::{ArpPacket, Operation as ArpOperation};
-    use crate::dhcp::{DhcpPacket, MessageType};
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+    use crate::dhcp::DhcpPacket;
 
     #[test]
     fn test_ethernet_packet() {
