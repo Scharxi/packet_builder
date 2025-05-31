@@ -1,10 +1,15 @@
 [package]
-name = "packet_builder"
-version = "0.1.0"
+name = "pktgen"
+version = "0.1.2"
 edition = "2024"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["ScharxiDev <scharxidev@outlook.de>"]
 description = "A modular network packet builder library"
 license = "MIT"
+repository = "https://github.com/Scharxi/packet_builder"
+documentation = "https://docs.rs/pktgen"
+readme = "README.md"
+keywords = ["network", "packet", "ethernet", "tcp", "udp"]
+categories = ["network-programming", "development-tools"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
