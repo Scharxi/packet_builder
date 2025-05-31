@@ -9,11 +9,15 @@
 //! - Async support via Tokio
 //! - Serialization support via Serde
 
+use serde::{Deserialize, Serialize};
 
 pub mod ethernet;
 pub mod ip;
 pub mod tcp;
 pub mod udp;
+pub mod icmp;
+pub mod arp;
+pub mod dhcp;
 pub mod error;
 pub mod socket;
 
@@ -87,6 +91,9 @@ mod tests {
     use crate::ip::{Ipv4Packet, Ipv4Address, IpProtocol};
     use crate::tcp::{TcpPacket, TcpFlags};
     use crate::udp::UdpPacket;
+    use crate::icmp::{IcmpPacket, IcmpType};
+    use crate::arp::{ArpPacket, Operation as ArpOperation};
+    use crate::dhcp::{DhcpPacket, MessageType};
 
     #[test]
     fn it_works() {
@@ -161,5 +168,36 @@ mod tests {
         assert!(packet.validate().is_ok());
         let bytes = packet.build().unwrap();
         assert_eq!(bytes.len(), 12); // 8 (header) + 4 (payload)
+    }
+
+    #[test]
+    fn test_icmp_packet() {
+        let packet = IcmpPacket::echo_request(1, 1, b"Hello, World!".to_vec()).unwrap();
+
+        assert!(packet.validate().is_ok());
+        assert_eq!(packet.header.message_type as u8, IcmpType::EchoRequest as u8);
+    }
+
+    #[test]
+    fn test_arp_packet() {
+        let src_mac = MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        let src_ip = Ipv4Address::new([192, 168, 1, 1]);
+        let target_ip = Ipv4Address::new([192, 168, 1, 2]);
+
+        let packet = ArpPacket::request(src_mac, src_ip, target_ip).unwrap();
+
+        assert!(packet.validate().is_ok());
+        assert_eq!(packet.header.operation as u16, ArpOperation::Request as u16);
+    }
+
+    #[test]
+    fn test_dhcp_packet() {
+        let chaddr = MacAddress::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        let xid = 0x12345678;
+
+        let packet = DhcpPacket::discover(xid, chaddr).unwrap();
+
+        assert!(packet.validate().is_ok());
+        assert_eq!(packet.header.op, 1); // BOOTREQUEST
     }
 }
