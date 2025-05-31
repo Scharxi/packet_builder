@@ -5,6 +5,7 @@ pub mod ip;
 pub mod tcp;
 pub mod udp;
 pub mod error;
+pub mod socket;
 
 pub use error::PacketError;
 
