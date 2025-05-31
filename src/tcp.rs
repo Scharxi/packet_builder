@@ -1,7 +1,22 @@
+//! TCP (Transmission Control Protocol) implementation.
+//!
+//! This module provides types and functionality for working with TCP packets,
+//! including TCP flags, options, and header construction.
+
 use serde::{Deserialize, Serialize};
 use crate::{PacketBuilder, PacketError, PacketHeader, Checksumable};
 
-/// TCP Flags
+/// TCP control flags used in the TCP header.
+///
+/// These flags control the state and behavior of the TCP connection:
+/// - FIN: No more data from sender
+/// - SYN: Synchronize sequence numbers
+/// - RST: Reset the connection
+/// - PSH: Push function
+/// - ACK: Acknowledgment field significant
+/// - URG: Urgent pointer field significant
+/// - ECE: ECN-Echo
+/// - CWR: Congestion Window Reduced
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct TcpFlags {
     pub fin: bool,
@@ -15,10 +30,15 @@ pub struct TcpFlags {
 }
 
 impl TcpFlags {
+    /// Creates a new TCP flags structure with all flags set to false.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Converts the flags to a byte representation.
+    ///
+    /// # Returns
+    /// A byte where each bit represents a flag's state.
     pub fn as_u8(&self) -> u8 {
         let mut flags = 0u8;
         if self.fin { flags |= 0b00000001; }
@@ -33,7 +53,15 @@ impl TcpFlags {
     }
 }
 
-/// TCP Header Options
+/// TCP header options.
+///
+/// These options provide additional control and functionality:
+/// - End of Option List: Marks the end of options
+/// - No Operation: Used for padding
+/// - Maximum Segment Size: Specifies the largest segment that can be received
+/// - Window Scale: Scale factor for the window size
+/// - Selective ACK Permitted: Enables selective acknowledgment
+/// - Timestamp: Used for round-trip time measurement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TcpOption {
     EndOfOptionList,
@@ -45,6 +73,10 @@ pub enum TcpOption {
 }
 
 impl TcpOption {
+    /// Converts the option to its byte representation.
+    ///
+    /// # Returns
+    /// A vector of bytes representing the option in wire format.
     pub fn as_bytes(&self) -> Vec<u8> {
         match self {
             TcpOption::EndOfOptionList => vec![0],
@@ -64,7 +96,16 @@ impl TcpOption {
     }
 }
 
-/// TCP Header
+/// TCP header structure.
+///
+/// Contains all fields defined in the TCP header format:
+/// - Source and destination ports
+/// - Sequence and acknowledgment numbers
+/// - Data offset and flags
+/// - Window size
+/// - Checksum
+/// - Urgent pointer
+/// - Options
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpHeader {
     src_port: u16,
@@ -80,6 +121,7 @@ pub struct TcpHeader {
 }
 
 impl TcpHeader {
+    /// Creates a new TCP header with the specified parameters.
     fn new(
         src_port: u16,
         dst_port: u16,
@@ -110,6 +152,7 @@ impl TcpHeader {
         header
     }
 
+    /// Calculates the total length of the header including options.
     fn calculate_total_length(&self) -> usize {
         let mut length = 20; // Base header length
         for option in &self.options {
@@ -120,14 +163,19 @@ impl TcpHeader {
     }
 }
 
-/// TCP Packet
+/// Complete TCP packet structure.
+///
+/// Contains both the TCP header and payload data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpPacket {
     header: TcpHeader,
     payload: Vec<u8>,
 }
 
-/// Builder for TCP packets
+/// Builder for constructing TCP packets.
+///
+/// Provides a fluent interface for creating TCP packets with proper
+/// validation and error handling.
 #[derive(Debug, Default)]
 pub struct TcpBuilder {
     src_port: Option<u16>,
@@ -142,6 +190,7 @@ pub struct TcpBuilder {
 }
 
 impl TcpBuilder {
+    /// Creates a new TCP packet builder with default values.
     pub fn new() -> Self {
         Self {
             src_port: None,
@@ -156,53 +205,67 @@ impl TcpBuilder {
         }
     }
 
+    /// Sets the source port.
     pub fn src_port(mut self, port: u16) -> Self {
         self.src_port = Some(port);
         self
     }
 
+    /// Sets the destination port.
     pub fn dst_port(mut self, port: u16) -> Self {
         self.dst_port = Some(port);
         self
     }
 
+    /// Sets the sequence number.
     pub fn sequence(mut self, seq: u32) -> Self {
         self.sequence_number = seq;
         self
     }
 
+    /// Sets the acknowledgment number and ACK flag.
     pub fn acknowledgment(mut self, ack: u32) -> Self {
         self.acknowledgment_number = ack;
         self.flags.ack = true;
         self
     }
 
+    /// Sets the TCP flags.
     pub fn flags(mut self, flags: TcpFlags) -> Self {
         self.flags = flags;
         self
     }
 
+    /// Sets the window size.
     pub fn window_size(mut self, size: u16) -> Self {
         self.window_size = size;
         self
     }
 
+    /// Sets the urgent pointer and URG flag.
     pub fn urgent_pointer(mut self, pointer: u16) -> Self {
         self.urgent_pointer = pointer;
         self.flags.urg = true;
         self
     }
 
+    /// Adds a TCP option.
     pub fn add_option(mut self, option: TcpOption) -> Self {
         self.options.push(option);
         self
     }
 
+    /// Sets the payload data.
     pub fn payload(mut self, payload: Vec<u8>) -> Self {
         self.payload = payload;
         self
     }
 
+    /// Builds the TCP packet.
+    ///
+    /// # Returns
+    /// - `Ok(TcpPacket)` - The constructed TCP packet
+    /// - `Err(PacketError)` - If any required fields are missing
     pub fn build(self) -> Result<TcpPacket, PacketError> {
         let src_port = self.src_port.ok_or_else(|| 
             PacketError::InvalidFieldValue("Source port not set".to_string()))?;
@@ -229,6 +292,7 @@ impl TcpBuilder {
 }
 
 impl TcpPacket {
+    /// Creates a new TCP packet builder.
     pub fn builder() -> TcpBuilder {
         TcpBuilder::new()
     }

@@ -1,3 +1,9 @@
+//! Network socket implementation for sending and receiving packets.
+//!
+//! This module provides both synchronous and asynchronous socket implementations
+//! for working with raw network packets. It supports IPv4 protocols and offers
+//! features like non-blocking I/O and timeout configuration.
+
 use std::io::{self, ErrorKind};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
@@ -8,37 +14,53 @@ use std::mem::MaybeUninit;
 use crate::PacketBuilder;
 use crate::error::PacketError;
 
-const MIN_BUFFER_SIZE: usize = 20; // Minimum IPv4 header size
+/// Minimum size required for an IPv4 header
+const MIN_BUFFER_SIZE: usize = 20;
 
-/// Socket wrapper for sending and receiving network packets
+/// A synchronous socket wrapper for sending and receiving network packets.
+///
+/// This struct provides a high-level interface for working with raw sockets,
+/// including support for both blocking and non-blocking operations.
 pub struct PacketSocket {
     socket: Socket,
     is_blocking: bool,
 }
 
 impl PacketSocket {
-    /// Create a new raw socket
+    /// Creates a new raw socket for the specified protocol.
+    ///
+    /// # Arguments
+    /// * `protocol` - The protocol to use (e.g., TCP, UDP)
+    ///
+    /// # Returns
+    /// * `Ok(PacketSocket)` - The created socket
+    /// * `Err(io::Error)` - If socket creation fails
     pub fn new(protocol: Protocol) -> io::Result<Self> {
         let domain = Domain::IPV4;
         let socket_type = Type::RAW;
         
         let socket = Socket::new(domain, socket_type, Some(protocol))?;
         
-        // By default, create in blocking mode
         Ok(Self {
             socket,
             is_blocking: true,
         })
     }
 
-    /// Set the socket to blocking or non-blocking mode
+    /// Sets the socket to blocking or non-blocking mode.
+    ///
+    /// # Arguments
+    /// * `nonblocking` - If true, sets the socket to non-blocking mode
     pub fn set_nonblocking(&mut self, nonblocking: bool) -> io::Result<()> {
         self.socket.set_nonblocking(nonblocking)?;
         self.is_blocking = !nonblocking;
         Ok(())
     }
 
-    /// Set socket timeout
+    /// Sets the socket timeout for both read and write operations.
+    ///
+    /// # Arguments
+    /// * `timeout` - The timeout duration, or None to disable timeout
     pub fn set_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
         if let Some(duration) = timeout {
             self.socket.set_read_timeout(Some(duration))?;
@@ -50,14 +72,25 @@ impl PacketSocket {
         Ok(())
     }
 
-    /// Bind the socket to a specific interface
+    /// Binds the socket to a specific network interface.
+    ///
+    /// # Arguments
+    /// * `addr` - The IPv4 address to bind to
     pub fn bind(&self, addr: Ipv4Addr) -> io::Result<()> {
         let sock_addr = SocketAddr::V4(SocketAddrV4::new(addr, 0));
         self.socket.bind(&SockAddr::from(sock_addr))?;
         Ok(())
     }
 
-    /// Send a packet
+    /// Sends a packet to the specified destination.
+    ///
+    /// # Arguments
+    /// * `packet` - The packet to send
+    /// * `dst_addr` - The destination IPv4 address
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - The number of bytes sent
+    /// * `Err(PacketError)` - If sending fails
     pub fn send<P: PacketBuilder>(&self, packet: &P, dst_addr: Ipv4Addr) -> Result<usize, PacketError> {
         let bytes = packet.build()?;
         let sock_addr = SocketAddr::V4(SocketAddrV4::new(dst_addr, 0));
@@ -68,7 +101,14 @@ impl PacketSocket {
         }
     }
 
-    /// Receive a packet
+    /// Receives a packet into the provided buffer.
+    ///
+    /// # Arguments
+    /// * `buffer` - The buffer to store the received packet
+    ///
+    /// # Returns
+    /// * `Ok((usize, Ipv4Addr))` - The number of bytes received and the source address
+    /// * `Err(PacketError)` - If receiving fails
     pub fn receive(&self, buffer: &mut [u8]) -> Result<(usize, Ipv4Addr), PacketError> {
         if buffer.len() < MIN_BUFFER_SIZE {
             return Err(PacketError::IoError(io::Error::new(
@@ -77,24 +117,19 @@ impl PacketSocket {
             )));
         }
 
-        // Create a buffer of MaybeUninit<u8>
         let mut uninit_buffer: Vec<MaybeUninit<u8>> = vec![MaybeUninit::uninit(); buffer.len()];
         
-        // Receive into the uninitialized buffer
         let n = match unsafe { self.socket.recv(uninit_buffer.as_mut_slice()) } {
             Ok(n) => n,
             Err(e) => return Err(PacketError::IoError(e)),
         };
 
-        // Copy the received data to the output buffer
         unsafe {
             for i in 0..n {
                 buffer[i] = uninit_buffer[i].assume_init();
             }
         }
 
-        // For raw sockets, we can extract the source IP from the packet itself
-        // The source IP address starts at offset 12 in an IPv4 header
         if n >= 16 {
             let src_ip = Ipv4Addr::new(
                 buffer[12],
@@ -111,7 +146,15 @@ impl PacketSocket {
         }
     }
 
-    /// Try to receive a packet (non-blocking)
+    /// Attempts to receive a packet without blocking.
+    ///
+    /// # Arguments
+    /// * `buffer` - The buffer to store the received packet
+    ///
+    /// # Returns
+    /// * `Ok(Some((usize, Ipv4Addr)))` - The number of bytes received and source address
+    /// * `Ok(None)` - If no packet is available
+    /// * `Err(PacketError)` - If receiving fails
     pub fn try_receive(&self, buffer: &mut [u8]) -> Result<Option<(usize, Ipv4Addr)>, PacketError> {
         if !self.is_blocking {
             match self.receive(buffer) {
@@ -125,13 +168,19 @@ impl PacketSocket {
     }
 }
 
-/// Async socket wrapper for sending and receiving network packets
+/// An asynchronous socket wrapper for sending and receiving network packets.
+///
+/// This struct provides an async interface for working with raw sockets using
+/// the Tokio runtime.
 pub struct AsyncPacketSocket {
     socket: tokio::net::UdpSocket,
 }
 
 impl AsyncPacketSocket {
-    /// Create a new async raw socket
+    /// Creates a new async raw socket for the specified protocol.
+    ///
+    /// # Arguments
+    /// * `protocol` - The protocol to use (e.g., TCP, UDP)
     pub async fn new(protocol: Protocol) -> io::Result<Self> {
         let std_socket = Socket::new(Domain::IPV4, Type::RAW, Some(protocol))?;
         std_socket.set_nonblocking(true)?;
@@ -141,14 +190,25 @@ impl AsyncPacketSocket {
         Ok(Self { socket })
     }
 
-    /// Bind the socket to a specific interface
+    /// Binds the socket to a specific network interface.
+    ///
+    /// # Arguments
+    /// * `addr` - The IPv4 address to bind to
     pub async fn bind(&self, addr: Ipv4Addr) -> io::Result<()> {
         let sock_addr = SocketAddr::V4(SocketAddrV4::new(addr, 0));
         tokio::net::UdpSocket::bind(&sock_addr).await?;
         Ok(())
     }
 
-    /// Send a packet asynchronously
+    /// Sends a packet asynchronously to the specified destination.
+    ///
+    /// # Arguments
+    /// * `packet` - The packet to send
+    /// * `dst_addr` - The destination IPv4 address
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - The number of bytes sent
+    /// * `Err(PacketError)` - If sending fails
     pub async fn send<P: PacketBuilder>(&self, packet: &P, dst_addr: Ipv4Addr) -> Result<usize, PacketError> {
         let bytes = packet.build()?;
         let sock_addr = SocketAddr::V4(SocketAddrV4::new(dst_addr, 0));
@@ -159,7 +219,14 @@ impl AsyncPacketSocket {
         }
     }
 
-    /// Receive a packet asynchronously
+    /// Receives a packet asynchronously into the provided buffer.
+    ///
+    /// # Arguments
+    /// * `buffer` - The buffer to store the received packet
+    ///
+    /// # Returns
+    /// * `Ok((usize, Ipv4Addr))` - The number of bytes received and source address
+    /// * `Err(PacketError)` - If receiving fails
     pub async fn receive(&self, buffer: &mut [u8]) -> Result<(usize, Ipv4Addr), PacketError> {
         match self.socket.recv_from(buffer).await {
             Ok((n, src_addr)) => {
@@ -173,7 +240,10 @@ impl AsyncPacketSocket {
         }
     }
 
-    /// Wait for the socket to become readable or writable
+    /// Waits for the socket to become ready for the specified operation.
+    ///
+    /// # Arguments
+    /// * `interest` - The type of operation to wait for (read/write)
     pub async fn ready(&self, interest: Interest) -> io::Result<()> {
         self.socket.ready(interest).await?;
         Ok(())

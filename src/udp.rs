@@ -1,7 +1,18 @@
+//! UDP (User Datagram Protocol) implementation.
+//!
+//! This module provides types and functionality for working with UDP packets,
+//! including header construction and packet building.
+
 use serde::{Deserialize, Serialize};
 use crate::{PacketBuilder, PacketError, PacketHeader, Checksumable};
 
-/// UDP Header
+/// UDP header structure.
+///
+/// Contains the basic fields of a UDP header:
+/// - Source port
+/// - Destination port
+/// - Length (header + payload)
+/// - Checksum
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UdpHeader {
     src_port: u16,
@@ -11,6 +22,12 @@ pub struct UdpHeader {
 }
 
 impl UdpHeader {
+    /// Creates a new UDP header with the specified parameters.
+    ///
+    /// # Arguments
+    /// * `src_port` - Source port number
+    /// * `dst_port` - Destination port number
+    /// * `length` - Total length of the UDP packet (header + payload)
     fn new(src_port: u16, dst_port: u16, length: u16) -> Self {
         Self {
             src_port,
@@ -21,14 +38,19 @@ impl UdpHeader {
     }
 }
 
-/// UDP Packet
+/// Complete UDP packet structure.
+///
+/// Contains both the UDP header and payload data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UdpPacket {
     header: UdpHeader,
     payload: Vec<u8>,
 }
 
-/// Builder for UDP packets
+/// Builder for constructing UDP packets.
+///
+/// Provides a fluent interface for creating UDP packets with proper
+/// validation and error handling.
 #[derive(Debug, Default)]
 pub struct UdpBuilder {
     src_port: Option<u16>,
@@ -37,25 +59,34 @@ pub struct UdpBuilder {
 }
 
 impl UdpBuilder {
+    /// Creates a new UDP packet builder with default values.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the source port.
     pub fn src_port(mut self, port: u16) -> Self {
         self.src_port = Some(port);
         self
     }
 
+    /// Sets the destination port.
     pub fn dst_port(mut self, port: u16) -> Self {
         self.dst_port = Some(port);
         self
     }
 
+    /// Sets the payload data.
     pub fn payload(mut self, payload: Vec<u8>) -> Self {
         self.payload = payload;
         self
     }
 
+    /// Builds the UDP packet.
+    ///
+    /// # Returns
+    /// - `Ok(UdpPacket)` - The constructed UDP packet
+    /// - `Err(PacketError)` - If any required fields are missing
     pub fn build(self) -> Result<UdpPacket, PacketError> {
         let src_port = self.src_port.ok_or_else(|| 
             PacketError::InvalidFieldValue("Source port not set".to_string()))?;
@@ -74,16 +105,25 @@ impl UdpBuilder {
 }
 
 impl UdpPacket {
+    /// Creates a new UDP packet builder.
     pub fn builder() -> UdpBuilder {
         UdpBuilder::new()
     }
 }
 
 impl PacketHeader for UdpHeader {
+    /// Returns the length of the UDP header in bytes.
+    ///
+    /// The UDP header is always 8 bytes long.
     fn header_length(&self) -> usize {
         8 // UDP header is always 8 bytes
     }
 
+    /// Converts the header to its byte representation.
+    ///
+    /// # Returns
+    /// - `Ok(Vec<u8>)` - The serialized header as a byte vector
+    /// - `Err(PacketError)` - If serialization fails
     fn as_bytes(&self) -> Result<Vec<u8>, PacketError> {
         let mut bytes = Vec::with_capacity(self.header_length());
         
@@ -104,9 +144,11 @@ impl PacketHeader for UdpHeader {
 }
 
 impl Checksumable for UdpHeader {
+    /// Calculates the UDP checksum.
+    ///
+    /// Note: This is a simplified checksum calculation.
+    /// In practice, UDP checksum includes a pseudo-header with IP addresses.
     fn calculate_checksum(&self) -> u16 {
-        // Note: This is a simplified checksum calculation
-        // In practice, UDP checksum includes a pseudo-header with IP addresses
         let mut sum = 0u32;
         let bytes = self.as_bytes().unwrap();
         
@@ -126,22 +168,40 @@ impl Checksumable for UdpHeader {
         !sum as u16
     }
 
+    /// Verifies the UDP checksum.
+    ///
+    /// # Returns
+    /// `true` if the checksum is valid, `false` otherwise.
     fn verify_checksum(&self) -> bool {
         self.calculate_checksum() == 0
     }
 }
 
 impl PacketBuilder for UdpPacket {
+    /// Builds the complete UDP packet.
+    ///
+    /// # Returns
+    /// - `Ok(Vec<u8>)` - The serialized packet as a byte vector
+    /// - `Err(PacketError)` - If packet construction fails
     fn build(&self) -> Result<Vec<u8>, PacketError> {
         let mut packet = self.header.as_bytes()?;
         packet.extend_from_slice(&self.payload);
         Ok(packet)
     }
 
+    /// Returns the total length of the UDP packet in bytes.
     fn length(&self) -> usize {
         self.header.header_length() + self.payload.len()
     }
 
+    /// Validates the UDP packet.
+    ///
+    /// Ensures that the total packet length does not exceed the maximum
+    /// allowed size for a UDP packet (65,535 bytes).
+    ///
+    /// # Returns
+    /// - `Ok(())` - If the packet is valid
+    /// - `Err(PacketError)` - If validation fails
     fn validate(&self) -> Result<(), PacketError> {
         if self.length() > 65535 {
             return Err(PacketError::InvalidLength);
