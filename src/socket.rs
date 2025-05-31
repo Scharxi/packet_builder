@@ -119,7 +119,7 @@ impl PacketSocket {
 
         let mut uninit_buffer: Vec<MaybeUninit<u8>> = vec![MaybeUninit::uninit(); buffer.len()];
         
-        let n = match unsafe { self.socket.recv(uninit_buffer.as_mut_slice()) } {
+        let n = match self.socket.recv(uninit_buffer.as_mut_slice()) {
             Ok(n) => n,
             Err(e) => return Err(PacketError::IoError(e)),
         };
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_blocking_send_receive() {
-        let mut sender = match skip_if_permission_error(PacketSocket::new(Protocol::TCP)) {
+        let sender = match skip_if_permission_error(PacketSocket::new(Protocol::TCP)) {
             Some(s) => s,
             None => return,
         };
